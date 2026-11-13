@@ -1,0 +1,15 @@
+# docker compose up -d   →   http://localhost:8080   (setup token: docker compose logs docthecode)
+# Put HTTPS in front of it for real use: GitHub needs a public https address for webhooks.
+services:
+  docthecode:
+    build: .
+    ports: ["8080:8080"]
+    volumes:
+      - docthecode-data:/data      # database, doc repos and secret key: back this volume up
+    restart: unless-stopped
+    # Optional: use an existing PostgreSQL instead of the one built into the image.
+    # environment:
+    #   DATABASE_URL: postgresql://user:pass@db.internal/docthecode
+
+volumes:
+  docthecode-data:
