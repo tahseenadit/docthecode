@@ -1,0 +1,19 @@
+# Deploys YOUR telemetry collector (not DocTheCode itself; DocTheCode's blueprint is ../render.yaml).
+# Render → New → Blueprint → pick this repo and set "Blueprint path" to telemetry-collector/render.yaml.
+# Then put the collector's URL and an ingest key into backend/app/config.py
+# (DEFAULT_TELEMETRY_URL / DEFAULT_TELEMETRY_KEY) before shipping DocTheCode.
+services:
+  - type: web
+    name: docthecode-telemetry
+    runtime: docker
+    dockerfilePath: ./telemetry-collector/Dockerfile
+    dockerContext: ./telemetry-collector
+    plan: free                   # fine here: a collector that sleeps just delays usage batches (DocTheCode retries)
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false              # your Neon / Supabase connection string
+      - key: COLLECTOR_INGEST_KEYS
+        generateValue: true      # write-only key that DocTheCode servers send; add more comma-separated to rotate
+      - key: COLLECTOR_ADMIN_TOKEN
+        generateValue: true      # for GET /v1/summary
