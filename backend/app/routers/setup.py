@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -162,6 +163,18 @@ def start_manifest(body: ManifestRequest, _=Depends(configurator)):
     return {"action": f"{web}{path}?state={state}", "manifest": json.dumps(manifest)}
 
 
+def credentials_from_conversion(app: dict) -> dict:
+    """Map GitHub's manifest-conversion response to a host's credentials.
+
+    GitHub returns no webhook secret when the app was created without a webhook (DocTheCode on a private
+    address). DocTheCode then never receives webhooks, but stores a random secret so the host is complete
+    and a webhook can be switched on later by entering the same secret on GitHub.
+    """
+    return {"app_id": str(app["id"]), "app_slug": app["slug"], "client_id": app["client_id"],
+            "client_secret": app["client_secret"], "private_key": app["pem"],
+            "webhook_secret": app.get("webhook_secret") or secrets.token_hex(32)}
+
+
 @router.get("/api/setup/github-app/callback")
 async def manifest_callback(request: Request, code: str, state: str, db: Session = Depends(get_db)):
     configurator(request, db)
@@ -173,10 +186,13 @@ async def manifest_callback(request: Request, code: str, state: str, db: Session
                             headers={"Accept": "application/vnd.github+json"})
     if r.status_code >= 400:
         raise HTTPException(502, f"GitHub did not return the app credentials: {r.text}")
-    app = r.json()
-    upsert_host(db, data["host_id"], name=data["host_name"], web_url=data["web_url"], api_url=data["api_url"],
-                app_id=str(app["id"]), app_slug=app["slug"], client_id=app["client_id"],
-                client_secret=app["client_secret"], private_key=app["pem"], webhook_secret=app["webhook_secret"])
+    try:
+        creds = credentials_from_conversion(r.json())
+        upsert_host(db, data["host_id"], name=data["host_name"], web_url=data["web_url"], api_url=data["api_url"],
+                    **creds)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(502, f"GitHub created the app but its credentials were incomplete ({e}). Delete the app "
+                                 "on GitHub and try again, or enter it under “I already have an app”.")
     db.commit()
     telemetry.track("github_app_saved", method="manifest", enterprise=data["web_url"] != "https://github.com")
     return RedirectResponse(f"{public_url()}/setup?created={data['host_id']}")
