@@ -13,11 +13,11 @@ from functools import lru_cache
 
 VERSION = "0.4.1"
 
-# Where DocTheCode instances send anonymous usage data: the collector you (the DocTheCode vendor)
-# run in front of your online database. Fill these in once the collector is deployed so
-# every DocTheCode you ship reports by default. Empty = no telemetry.
-DEFAULT_TELEMETRY_URL = ""
-DEFAULT_TELEMETRY_KEY = ""
+# Where DocTheCode servers send anonymous usage data: the maintainers' collector (telemetry-collector/).
+# The ingest key can only submit usage data, never read it. Forks can point these at their own
+# collector, override them with DOCTHECODE_TELEMETRY_URL / _KEY, or set the URL to "" to disable.
+DEFAULT_TELEMETRY_URL = "https://docthecode-telemetry.onrender.com"
+DEFAULT_TELEMETRY_KEY = "OB5oJkBB8OWLgbH/3/2FoFqYq/mAPGsgXk/4ZXEGHfg="  # write-only ingest key; public by design
 
 
 @dataclass(frozen=True)
