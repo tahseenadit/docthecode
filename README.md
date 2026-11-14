@@ -187,7 +187,7 @@ Everything that goes from DocTheCode *to* GitHub works either way: the documenta
 ### 3. Open it and finish setup in the browser
 
 1. Open DocTheCode's address. Until setup is finished, it shows the setup page to whoever opens it first.
-2. **Connect GitHub** → *Create automatically*. DocTheCode fills in its own callback and webhook URLs; confirm on GitHub, then **install the app** on the repositories you want documented.
+2. **Connect GitHub** → *Create automatically*. DocTheCode fills in its own callback URL, and its webhook URL when *GitHub can reach this address* is ticked; confirm on GitHub, then **install the app** on the repositories you want documented.
 3. **Choose the AI provider** for the documentation agent, paste its API key (not needed for GitHub Copilot), click *Load models* and pick one, then *Test*.
 4. **Sign in with GitHub**. You become the admin.
 
