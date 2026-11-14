@@ -70,7 +70,7 @@ async def usage_stats(request: Request, call_next):
         route = _route_template(request)
         telemetry.record_exception(e, "request", route=route, method=request.method)
         telemetry.client().record_request(route, request.method, 500, (time.perf_counter() - start) * 1000)
-        logging.getLogger("docthecode").error("Unhandled error on %s %s", request.method, route, exc_info=False)
+        logging.getLogger("docthecode").error("Unhandled error on %s %s", request.method, route, exc_info=e)
         return JSONResponse({"detail": "Internal server error"}, status_code=500)
     telemetry.client().record_request(_route_template(request), request.method, response.status_code,
                                       (time.perf_counter() - start) * 1000)
