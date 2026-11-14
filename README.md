@@ -73,7 +73,7 @@ Approvals are tied to the doc commit they were given on, so any new doc commit (
 | Doc contents and full history | Bare git repositories in `/data/repos` |
 | GitHub App secrets, private keys, AI provider keys, users' GitHub tokens | The database, encrypted with the server's secret key |
 | Secret key | Generated into `/data/.secret_key` on first start, or `DOCTHECODE_SECRET_KEY` from a secret manager |
-| Anonymous usage statistics and error reports | Sent only if the build has a usage-data collector configured and the admin leaves it on (see *Usage data*) |
+| Anonymous usage statistics and error reports | Sent to the DocTheCode maintainers' collector unless an admin switches it off (see *Usage data*) |
 
 **Why PostgreSQL + git.** Documentation is a set of Markdown files that change together and need history, diffs, review and merges: that is what git is for, so doc contents live in git repositories. PostgreSQL holds the structured data (users, members, PRs, reviews, settings) and handles concurrent users and background jobs without fuss. The image runs its own PostgreSQL inside the container, reachable only through a socket inside it, so there's nothing extra to install or connect; set `DATABASE_URL` to use an existing Postgres instead.
 
@@ -114,7 +114,7 @@ Model lists come from the provider (*Load models*), so new models appear without
 
 ## Usage data
 
-DocTheCode can send anonymous usage statistics and error reports to a collector run by the people who ship your build, so they can see which features are used, where onboarding stalls, how the agent performs and what breaks. It is only active when the build has a collector configured (`DEFAULT_TELEMETRY_URL` in `backend/app/config.py`, or `DOCTHECODE_TELEMETRY_URL`) and an admin hasn't switched it off.
+DocTheCode sends anonymous usage statistics and error reports to a collector run by the DocTheCode maintainers (`https://docthecode-telemetry.onrender.com`), so we can see which features are used, where onboarding stalls, how the agent performs and what breaks. Nothing that identifies your organization, people, code or documentation is sent. Forks can point it at their own collector with `DOCTHECODE_TELEMETRY_URL` and `DOCTHECODE_TELEMETRY_KEY`, or change the defaults in `backend/app/config.py`.
 
 | Sent | Never sent |
 |---|---|
