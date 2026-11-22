@@ -38,10 +38,6 @@ def openai_reply(content=None, calls=(), finish="stop"):
     return {"choices": [{"message": msg, "finish_reason": finish}]}
 
 
-async def nothing(*_):
-    return None
-
-
 def test_full_agent_run_over_openai_wire_format(tmp_path):
     http = FakeHTTP([
         openai_reply("Reading the CLI page.", [("c1", "read_doc_file", {"path": "cli.md"})]),
@@ -49,7 +45,7 @@ def test_full_agent_run_over_openai_wire_format(tmp_path):
                             ("c3", "finish", {"summary": "Documented --verbose", "changes_needed": True})]),
     ])
     api = OpenAIChat("sk-test", "https://api.openai.com/v1", post=http)
-    res = asyncio.run(DocAgent(api, "some-model").run(CTX, ws_for(tmp_path), nothing, nothing))
+    res = asyncio.run(DocAgent(api, "some-model").run(CTX, ws_for(tmp_path), None))
     assert res.finished and res.changes == {"cli.md": "# CLI\n\n--verbose\n"}
 
     url, headers, body = http.calls[0]
@@ -65,7 +61,7 @@ def test_anthropic_is_a_pass_through(tmp_path):
     http = FakeHTTP([{"content": [{"type": "tool_use", "id": "t1", "name": "finish",
                                    "input": {"summary": "ok", "changes_needed": False}}], "stop_reason": "tool_use"}])
     api = AnthropicMessages("sk-ant-x", post=http)
-    res = asyncio.run(DocAgent(api, "claude-sonnet-5-5").run(CTX, ws_for(tmp_path), nothing, nothing))
+    res = asyncio.run(DocAgent(api, "claude-sonnet-5-5").run(CTX, ws_for(tmp_path), None))
     url, headers, body = http.calls[0]
     assert url == "https://api.anthropic.com/v1/messages" and headers["x-api-key"] == "sk-ant-x"
     assert body["tools"][0]["input_schema"] and res.finished
