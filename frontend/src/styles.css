@@ -54,6 +54,7 @@ label.check input, .radios input { width: auto; }
 .btn-link { background: none; border: none; color: var(--accent); cursor: pointer; font: inherit; padding: 0; }
 
 .badge, .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; border: 1px solid var(--border); }
+.doc-kind { margin-left: 10px; vertical-align: middle; font-size: 12px; font-weight: 500; }
 .state-open { background: var(--green); color: #fff; border-color: transparent; }
 .state-merged { background: var(--purple); color: #fff; border-color: transparent; }
 .state-closed { background: var(--red); color: #fff; border-color: transparent; }

@@ -197,6 +197,25 @@ class GitHubClient:
         data = await self._request("GET", f"/repos/{owner}/{repo}/git/trees/{ref}", token, params={"recursive": "1"})
         return [t["path"] for t in data.get("tree", []) if t["type"] == "blob"]
 
+    async def tarball(self, token: str, owner: str, repo: str, ref: str, max_bytes: int) -> bytes:
+        """The repository at `ref` as a gzipped tarball. Raises GitHubError if it is bigger than max_bytes."""
+        url = f"{self.host.api_url}/repos/{owner}/{repo}/tarball/{ref}"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+                   "X-GitHub-Api-Version": API_VERSION, "User-Agent": "DocTheCode"}
+        # GitHub redirects to a short-lived download URL on another host; httpx drops the
+        # Authorization header on that cross-host redirect, which is what we want.
+        async with self.http.stream("GET", url, headers=headers, follow_redirects=True,
+                                    timeout=httpx.Timeout(120, connect=15)) as r:
+            if r.status_code >= 400:
+                raise GitHubError(r.status_code, (await r.aread()).decode(errors="replace")[:300])
+            chunks, size = [], 0
+            async for chunk in r.aiter_bytes():
+                size += len(chunk)
+                if size > max_bytes:
+                    raise GitHubError(413, f"repository archive is larger than {max_bytes // 1_000_000} MB")
+                chunks.append(chunk)
+        return b"".join(chunks)
+
     async def repo_collaborators(self, token: str, owner: str, repo: str) -> list[dict]:
         """Everyone with access to the repo (direct, via teams, org base permission, outside collaborators)."""
         return await self._paginate(f"/repos/{owner}/{repo}/collaborators", token, extra={"affiliation": "all"})

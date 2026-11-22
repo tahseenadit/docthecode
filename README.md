@@ -4,7 +4,7 @@
 
 DocTheCode hosts documentation spaces and connects each one to a GitHub repository. When someone opens a pull request on the code repo, DocTheCode opens a matching **doc PR**, an AI agent drafts the documentation changes, and a required GitHub check keeps the code PR **unmergeable until the doc PR is approved**. When the code PR merges, the doc PR merges with it.
 
-**Version 0.4.1** · [Apache 2.0 license](LICENSE)
+**Version 0.5.0** · [Apache 2.0 license](LICENSE)
 
 - **Self-hosted, your data stays yours.** DocTheCode is one Docker image with PostgreSQL built in. Each organization builds it, hosts it wherever it likes, and finishes setup in the browser. Docs, users, credentials and history stay on that host.
 - **Sign in with GitHub**: personal accounts, GitHub Enterprise Cloud orgs on github.com, and any number of GitHub Enterprise Server instances. Everyone automatically sees the doc spaces and open doc PRs for the GitHub repositories they can access.
@@ -96,11 +96,41 @@ images/architecture.png     an attachment
 - A page's title is its first `# Heading` (or `title:` front matter); `order: 1` front matter pins its position among siblings.
 - **+ Child page** on a plain page turns it into a section automatically.
 - **Move** relocates a page or a whole section (attachments included); **Rename** changes only the title, so links keep working. Relative links between pages navigate inside DocTheCode.
-- The agent sees the page tree (not just file names) and is instructed to organize by audience and topic (Getting started, Guides, Concepts, Reference, Operations), update existing pages before adding new ones, link new pages from their section page, and never recreate the code's folder structure. Per-repo agent instructions can describe a space's own conventions.
+- The agent organizes pages by reader and topic, updates existing pages before adding new ones, links new pages from their section page, and never recreates the code's folder structure. Per-repo agent instructions can describe a space's own conventions.
+
+## What the agent writes
+
+The agent maintains four kinds of documentation, and each page it writes is one of them:
+
+| Kind | For | Covers |
+|---|---|---|
+| **Business** | Product owners, support, stakeholders | What the product does and the rules it follows, derived from the code's logic: capabilities, roles and permissions, workflows and their states, validation, limits, calculations, side effects, a glossary. Written in the domain's language, without implementation details. |
+| **Tutorials** | New users and developers | Getting started and step-by-step guides for the main tasks, with prerequisites, exact commands or requests from the code, and expected results. |
+| **Reference** | Integrators and users | Every interface, exactly: endpoints, CLI commands and flags, configuration and environment variables (with types and defaults), events and webhooks, data model, error codes. |
+| **Technical** | Engineers | Architecture, components and how they talk, data flows, storage, integrations, security, deployment, operations and local development, with the code locations to look at. |
+
+**An empty space gets a full documentation set.** When the first doc PR runs against an empty space (or one with only a placeholder home page), the agent studies the whole codebase and writes a home page plus `business/`, `tutorials/`, `reference/` and `technical/` sections, sized to the codebase, along with the documentation for the PR itself.
+
+**A space with pages is kept in step with each change.** The agent works out which pages the pull request affects, checks all four kinds for impact (a changed rule touches business docs, a new flag touches reference and maybe a tutorial, a new queue touches technical docs), and updates only what the change makes wrong or incomplete. If a whole kind is missing, for example a space with only reference pages, it creates that section from the whole codebase.
+
+**Pages record what they document.** The agent starts each page with front matter:
+
+```yaml
+---
+type: reference                                   # business | tutorial | reference | technical
+covers: src/api/invoices/*, src/billing/tax.py    # code paths or globs this page documents
+---
+```
+
+Before each run, DocTheCode matches the PR's changed files against every page's `covers` (and against file names mentioned in pages) and gives the agent that list, so the pages a change affects are found reliably, not only by the model's judgement. Pages you write yourself can use the same front matter; pages without it are classified by their section (`tutorials/`, `reference/`, …). The kind shows as a badge next to the page title.
+
+**How it reads the code.** For each run, DocTheCode downloads the code repo at the PR's head commit once (GitHub's archive endpoint) and keeps its text files in memory: the agent gets a repository overview, can list and read any file by line range, and search the whole codebase. Vendored, generated and binary files are left out. If the archive is unavailable or larger than 150 MB, the agent reads files one at a time through the GitHub API instead. Long runs drop older tool output from the conversation so they stay within the model's context.
+
+The agent only drafts: every change still lands on the doc PR, and reviewers approve it, edit it, or request changes (which the agent can redraft).
 
 ## AI providers
 
-The documentation agent is the same everywhere: it gets the PR's diff and the space's page tree, and edits pages through DocTheCode's tools (read page, write page, read code file, finish…). Only the model behind it changes. Admins pick it under **Admin → Documentation agent**:
+The documentation agent is the same everywhere: it gets the PR's diff, an inventory of the space and an overview of the codebase, and works through DocTheCode's tools (search and read code, search and read pages, write pages, finish…). Only the model behind it changes. Bigger models write better business and technical documentation; for writing a whole documentation set, pick a strong model with a large context window. Admins pick it under **Admin → Documentation agent**:
 
 | Provider | What you need | Notes |
 |---|---|---|
@@ -136,7 +166,7 @@ DocTheCode ships as one Docker image containing the web app, the API and Postgre
 **Option A: use the prebuilt image.** Every release is published to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/tahseenadit/docthecode:latest      # or a version, e.g. :0.4.1
+docker pull ghcr.io/tahseenadit/docthecode:latest      # or a version, e.g. :0.5.0
 ```
 
 **Option B: build it yourself.** Install [Docker Desktop](https://docs.docker.com/desktop/) (macOS, Windows) or [Docker Engine](https://docs.docker.com/engine/install/) (Linux); [Podman](https://podman-desktop.io) works too. Node, Python and PostgreSQL are fetched inside the build.
@@ -211,6 +241,8 @@ None are needed. They only override the defaults:
 | `DOCTHECODE_DATA_DIR`, `DOCTHECODE_BACKUP_DIR` | `/data`, `/backup` | move the folders |
 | `DOCTHECODE_SETUP_TOKEN` | none: the first visitor runs setup | require this token to run setup; use it if DocTheCode is reachable from the internet before you finish setting it up |
 | `DOCTHECODE_TELEMETRY` | `on` | `off` disables anonymous usage data for the server |
+| `DOCTHECODE_AGENT_MAX_TURNS` | `40` | limit the model calls in a normal agent run |
+| `DOCTHECODE_AGENT_BOOTSTRAP_MAX_TURNS` | `150` | limit the model calls in a run that writes a whole space or a missing kind of documentation |
 
 ## Development
 
@@ -238,7 +270,9 @@ If you created your GitHub App by hand, make sure it has the **Member** event an
 backend/                     DocTheCode server: FastAPI + SQLAlchemy + PostgreSQL (Python 3.11+)
   app/gitstore.py            Bare git repos (plumbing only, CAS ref updates, merge-tree merges, byte-safe moves)
   app/pages.py               Page tree rules: titles, sections, ordering, child pages, moves
-  app/agent/doc_agent.py     Provider-neutral tool-use loop that edits the doc space
+  app/agent/doc_agent.py     Provider-neutral tool-use loop that edits the doc space; prompt and tools
+  app/agent/doc_inventory.py Kinds of documentation, page inventory, pages affected by a change
+  app/agent/codebase.py      Code repo snapshot for the agent: overview, list, read, search
   app/agent/providers.py     Anthropic, OpenAI, Gemini and OpenAI-compatible adapters (plain HTTPS)
   app/agent/copilot_agent.py GitHub Copilot via the Copilot SDK, same tools
   app/services/settings.py   Encrypted credentials, GitHub hosts, first-run setup

@@ -129,6 +129,20 @@ function TreeItem({ node, selected, depth, onOpen }: { node: PageNode; selected:
 }
 
 // ------------------------------------------------------------------ page view
+const DOC_KINDS: Record<string, string> = {
+  business: "Business", product: "Business", domain: "Business", concepts: "Business", explanation: "Business",
+  tutorial: "Tutorial", tutorials: "Tutorial", guide: "Tutorial", guides: "Tutorial", "how-to": "Tutorial",
+  reference: "Reference", api: "Reference",
+  technical: "Technical", architecture: "Technical", engineering: "Technical", operations: "Technical",
+};
+
+/** The page's kind of documentation from its `type:` front matter, if any. */
+function docKind(content: string): string | null {
+  const fm = content.match(/^---\s*\n([\s\S]*?)\n---/);
+  const type = fm?.[1].match(/^type\s*:\s*(.+)$/im)?.[1].trim().replace(/^["']|["']$/g, "").toLowerCase();
+  return (type && DOC_KINDS[type]) || null;
+}
+
 function stripForDisplay(content: string, title: string): string {
   let body = content.replace(/^---\s*\n[\s\S]*?\n---\s*(\n|$)/, "");
   const firstHeading = body.match(/^\s*# (.+)\n?/);
@@ -184,7 +198,7 @@ function PageView(props: {
         ))}
       </nav>
       <div className="row between page-head">
-        <h1>{title}</h1>
+        <h1>{title}{isMd && docKind(data.content) && <span className="badge muted doc-kind" title="Kind of documentation">{docKind(data.content)}</span>}</h1>
         {canWrite && isMd && (
           <div className="row">
             <button className="btn" onClick={() => { setEditing(true); track("edit_opened"); }}>Edit</button>

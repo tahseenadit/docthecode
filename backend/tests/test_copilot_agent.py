@@ -6,7 +6,8 @@ import types
 import pytest
 
 from app.agent.copilot_agent import copilot_ping, run_with_copilot
-from app.agent.doc_agent import CodeContext, DocWorkspace
+from app.agent.codebase import SnapshotCodebase
+from app.agent.doc_agent import TOOL_NAMES, CodeContext, DocWorkspace
 from app.agent.providers import ProviderError
 from app.gitstore import Author, GitStore
 
@@ -64,8 +65,7 @@ def ws(tmp_path):
     return DocWorkspace(lambda: store.list_files("d", "main"), lambda p: store.read_file("d", "main", p))
 
 
-async def nothing(*_):
-    return None
+CODE = SnapshotCodebase({"cli.py": "parser.add_argument('--verbose')\n"})
 
 
 def test_copilot_run_uses_installation_token_and_only_docthecode_tools(ws, monkeypatch):
@@ -73,19 +73,21 @@ def test_copilot_run_uses_installation_token_and_only_docthecode_tools(ws, monke
 
     async def model(tools, turn):
         assert "# CLI" in await tools["read_doc_file"].handler({"path": "cli.md"}, None)
+        assert "cli.py:1:" in await tools["search_code"].handler({"pattern": "verbose"}, None)
         assert (await tools["write_doc_file"].handler({"path": "../x", "content": "x"}, None)).startswith("Error")
         await tools["write_doc_file"].handler({"path": "cli.md", "content": "# CLI\n\n--verbose\n"}, None)
         await tools["finish"].handler({"summary": "Documented --verbose", "changes_needed": True}, None)
 
     monkeypatch.setitem(sys.modules, "copilot", fake_sdk(model, record))
-    res = asyncio.run(run_with_copilot(CTX, ws, nothing, nothing, github_token="ghs_install", model="auto"))
+    res = asyncio.run(run_with_copilot(CTX, ws, CODE, github_token="ghs_install", model="auto"))
     assert res.finished and res.summary == "Documented --verbose"
     assert res.changes == {"cli.md": "# CLI\n\n--verbose\n"}
     assert record["token"] == "ghs_install" and record["logged_in"] is False and record["stopped"]
-    assert set(record["config"]["available_tools"]) == {"list_pages", "list_doc_files", "read_doc_file", "write_doc_file",
-                                                        "delete_doc_file", "list_code_files", "read_code_file", "finish"}
+    assert record["config"]["available_tools"] == TOOL_NAMES
+    assert "bash" not in TOOL_NAMES and "search_code" in record["config"]["system_message"]["content"]
     assert "--verbose" in record["prompts"][0] and len(record["prompts"]) == 1
-    assert any(t.startswith("💬") for t in res.transcript)
+    assert any(t.startswith("💬") for t in res.transcript) and res.mode == "bootstrap"
+    assert "## Mode: bootstrap" in record["prompts"][0]
 
 
 def test_copilot_is_nudged_to_finish(ws, monkeypatch):
@@ -96,7 +98,7 @@ def test_copilot_is_nudged_to_finish(ws, monkeypatch):
             await tools["finish"].handler({"summary": "Nothing to change", "changes_needed": False}, None)
 
     monkeypatch.setitem(sys.modules, "copilot", fake_sdk(model, record))
-    res = asyncio.run(run_with_copilot(CTX, ws, nothing, nothing, github_token="t"))
+    res = asyncio.run(run_with_copilot(CTX, ws, CODE, github_token="t"))
     assert res.finished and len(record["prompts"]) == 2 and "finish" in record["prompts"][1]
 
 
@@ -117,4 +119,4 @@ def test_copilot_ping(monkeypatch):
 def test_missing_sdk_is_a_clear_error(ws, monkeypatch):
     monkeypatch.setitem(sys.modules, "copilot", None)
     with pytest.raises(ProviderError, match="github-copilot-sdk"):
-        asyncio.run(run_with_copilot(CTX, ws, nothing, nothing, github_token="t"))
+        asyncio.run(run_with_copilot(CTX, ws, CODE, github_token="t"))

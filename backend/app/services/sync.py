@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..agent.codebase import ApiCodebase, SnapshotCodebase
 from ..agent.copilot_agent import run_with_copilot
 from ..agent.doc_agent import CodeContext, DocAgent, DocWorkspace
 from ..agent.providers import messages_api
@@ -212,6 +213,26 @@ def merge_doc_pr(db: Session, pr: DocPullRequest, merged_by: str) -> str:
 
 
 # --------------------------------------------------------------------- agent
+MAX_ARCHIVE_BYTES = 150_000_000
+
+
+async def load_codebase(gh: GitHubClient, token: str, owner: str, repo: str, sha: str):
+    """The code repo at `sha` for the agent: a full snapshot when possible, else file-by-file API access."""
+    try:
+        data = await gh.tarball(token, owner, repo, sha, MAX_ARCHIVE_BYTES)
+        return await asyncio.to_thread(SnapshotCodebase.from_tarball, data)
+    except Exception as e:  # too large, or no archive endpoint (old GHES): read through the API instead
+        log.warning("code snapshot unavailable for %s/%s@%s: %s", owner, repo, sha[:12], e)
+
+    async def list_paths():
+        return await gh.tree(token, owner, repo, sha)
+
+    async def read_file(path: str):
+        return await gh.file_content(token, owner, repo, path, sha)
+
+    return ApiCodebase(list_paths, read_file)
+
+
 def _feedback(pr: DocPullRequest) -> list[Review]:
     return [r for r in pr.reviews if r.state in ("changes_requested", "commented")
             and r.body.strip() and not r.addressed_by_agent]
@@ -267,15 +288,7 @@ async def _run_agent_locked(pr_id: str, force: bool) -> None:
         branch_sha = store.branch_sha(repo.id, pr.head_branch)
         ws = DocWorkspace(lambda: store.list_files(repo.id, branch_sha),
                           lambda p: store.read_file(repo.id, branch_sha, p))
-        code_tree: list[str] = []
-
-        async def read_code(path: str):
-            return await gh.file_content(token, link.owner, link.repo, path, head_sha)
-
-        async def list_code():
-            if not code_tree:
-                code_tree.extend(await gh.tree(token, link.owner, link.repo, head_sha))
-            return code_tree
+        code = await load_codebase(gh, token, link.owner, link.repo, head_sha)
 
         cfg = agent_config()
         if cfg.problem():
@@ -286,22 +299,25 @@ async def _run_agent_locked(pr_id: str, force: bool) -> None:
         started = time.monotonic()
         if cfg.provider == "copilot":
             # Billed to the code repo's organization through DocTheCode's GitHub App installation.
-            result = await run_with_copilot(ctx, ws, read_code, list_code, github_token=token, model=model,
+            result = await run_with_copilot(ctx, ws, code, github_token=token, model=model,
                                             instructions=link.agent_instructions, feedback=notes,
                                             existing_doc_diff=existing)
         else:
-            agent = DocAgent(messages_api(cfg), model, settings.agent_max_turns)
-            result = await agent.run(ctx, ws, read_code, list_code, instructions=link.agent_instructions,
+            agent = DocAgent(messages_api(cfg), model, settings.agent_max_turns,
+                             bootstrap_max_turns=settings.agent_bootstrap_max_turns)
+            result = await agent.run(ctx, ws, code, instructions=link.agent_instructions,
                                      feedback=notes, existing_doc_diff=existing)
         telemetry.track("agent_run", status="finished" if result.finished else "turn_limit", model=model,
                         provider=cfg.provider,
                         seconds=round(time.monotonic() - started, 1), turns=result.turns,
                         files_changed=len(result.changes), files_deleted=sum(1 for c in result.changes.values() if c is None),
-                        incremental=incremental, feedback=len(feedback), code_files=len(files),
+                        incremental=incremental, feedback=len(feedback), code_files=len(files), mode=result.mode,
+                        code_source=type(code).__name__,
                         diff_kb=round(len(diff) / 1024), has_instructions=bool(link.agent_instructions.strip()))
 
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        log_entry = [f"── Run at {stamp} for {head_sha[:12]}{' (incremental)' if incremental else ''}",
+        log_entry = [f"── Run at {stamp} for {head_sha[:12]}{' (incremental)' if incremental else ''}"
+                     f"{' · writing the documentation set' if result.mode == 'bootstrap' else ''}",
                      *result.transcript]
         if result.changes:
             msg = f"Update docs for {link.gh_full_name}#{pr.gh_pr_number} ({head_sha[:7]})\n\n{result.summary}"

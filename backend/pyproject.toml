@@ -1,6 +1,6 @@
 [project]
 name = "docthecode"
-version = "0.4.1"
+version = "0.5.0"
 description = "Documentation repos that stay in sync with GitHub pull requests"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"

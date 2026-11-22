@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 
-VERSION = "0.4.1"
+VERSION = "0.5.0"
 
 # Where DocTheCode servers send anonymous usage data: the maintainers' collector (telemetry-collector/).
 # The ingest key can only submit usage data, never read it. Forks can point these at their own
@@ -57,6 +57,7 @@ class Settings:
     git_root: str = ""                   # doc repos (bare git)
     repo_storage: str = "disk"           # "disk" or "database" (see services/repo_storage.py)
     agent_max_turns: int = 40
+    agent_bootstrap_max_turns: int = 150   # runs that write a whole kind of documentation (or the whole space)
     check_name: str = "DocTheCode / documentation approved"
     # Anonymous product telemetry (see services/telemetry.py). Admins can switch it off in the UI;
     # DOCTHECODE_TELEMETRY=off disables it for the whole server.
@@ -93,6 +94,8 @@ def get_settings() -> Settings:
         git_root=env.get("DOCTHECODE_GIT_ROOT") or f"{data_dir}/repos",
         repo_storage=env.get("DOCTHECODE_REPO_STORAGE", Settings.repo_storage).lower(),
         agent_max_turns=int(env.get("DOCTHECODE_AGENT_MAX_TURNS", Settings.agent_max_turns)),
+        agent_bootstrap_max_turns=int(env.get("DOCTHECODE_AGENT_BOOTSTRAP_MAX_TURNS",
+                                              Settings.agent_bootstrap_max_turns)),
         check_name=env.get("DOCTHECODE_CHECK_NAME", Settings.check_name),
         telemetry_url=env.get("DOCTHECODE_TELEMETRY_URL", DEFAULT_TELEMETRY_URL).rstrip("/"),
         telemetry_key=env.get("DOCTHECODE_TELEMETRY_KEY", DEFAULT_TELEMETRY_KEY),

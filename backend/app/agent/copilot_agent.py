@@ -14,15 +14,15 @@ Usage is billed to that organization's Copilot plan.
 from __future__ import annotations
 
 import asyncio
-from typing import Awaitable, Callable
 
-from .doc_agent import (SYSTEM_PROMPT, TOOLS, AgentResult, CodeContext, DocWorkspace, _short_args,
-                        build_task_message, call_tool)
+from . import doc_inventory as inv
+from .codebase import Codebase
+from .doc_agent import (SYSTEM_PROMPT, TOOL_NAMES, TOOLS, AgentResult, CodeContext, DocWorkspace, _safe_overview,
+                        _short_args, build_task_message, call_tool, plan_run)
 from .providers import ProviderError
 
-COPILOT_PREAMBLE = """You are running inside DocTheCode, not in a code checkout. Use ONLY the DocTheCode tools you were given \
-(list_pages, read_doc_file, write_doc_file, delete_doc_file, list_code_files, read_code_file, finish). \
-There is no shell and no local file system.
+COPILOT_PREAMBLE = f"""You are running inside DocTheCode, not in a code checkout. Use ONLY the DocTheCode tools you were given \
+({", ".join(TOOL_NAMES)}). There is no shell and no local file system.
 
 """
 
@@ -44,14 +44,15 @@ def _client(copilot, github_token: str):
     return copilot.CopilotClient({"github_token": github_token, "use_logged_in_user": False})  # older SDKs
 
 
-async def run_with_copilot(ctx: CodeContext, ws: DocWorkspace,
-                           read_code: Callable[[str], Awaitable[str | None]],
-                           list_code: Callable[[], Awaitable[list[str]]], *,
+async def run_with_copilot(ctx: CodeContext, ws: DocWorkspace, code: Codebase | None, *,
                            github_token: str, model: str = "auto", instructions: str = "",
                            feedback: list[str] | None = None, existing_doc_diff: str = "",
-                           timeout: float = 900) -> AgentResult:
+                           timeout: float = 900, bootstrap_timeout: float = 2700) -> AgentResult:
     copilot = _sdk()
-    transcript: list[str] = []
+    plan = plan_run(ctx, ws)
+    if plan.mode == "bootstrap" or plan.status.missing:
+        timeout = max(timeout, bootstrap_timeout)
+    transcript: list[str] = [f"📋 Mode: {plan.mode} · {inv.format_status(plan.status).splitlines()[0]}"]
     state = {"summary": "", "finished": False, "calls": 0}
 
     def make_handler(name: str):
@@ -63,7 +64,7 @@ async def run_with_copilot(ctx: CodeContext, ws: DocWorkspace,
                 transcript.append(f"🔧 finish({_short_args(args)})")
                 return "Finished. Stop now."
             try:
-                out = await call_tool(name, args, ws, read_code, list_code)
+                out = await call_tool(name, args, ws, code)
                 transcript.append(f"🔧 {name}({_short_args(args)})")
                 return out
             except Exception as e:  # tool errors go back to the model
@@ -73,7 +74,8 @@ async def run_with_copilot(ctx: CodeContext, ws: DocWorkspace,
 
     tools = [copilot.define_tool(name=t["name"], description=t["description"], parameters=t["input_schema"],
                                  handler=make_handler(t["name"])) for t in TOOLS]
-    task = build_task_message(ctx, ws.outline(), instructions, feedback or [], existing_doc_diff)
+    task = build_task_message(ctx, plan, ws.outline(), await _safe_overview(code), instructions, feedback or [],
+                              existing_doc_diff)
 
     client = _client(copilot, github_token)
     await client.start()
@@ -82,7 +84,7 @@ async def run_with_copilot(ctx: CodeContext, ws: DocWorkspace,
             "model": model or "auto",
             "system_message": {"mode": "append", "content": COPILOT_PREAMBLE + SYSTEM_PROMPT},
             "tools": tools,
-            "available_tools": [t["name"] for t in TOOLS],  # only DocTheCode's tools: no shell, no files
+            "available_tools": TOOL_NAMES,  # only DocTheCode's tools: no shell, no files
             "on_permission_request": copilot.PermissionHandler.approve_all,
         })
 
@@ -112,7 +114,7 @@ async def run_with_copilot(ctx: CodeContext, ws: DocWorkspace,
             pass
 
     return AgentResult(dict(ws.changes), state["summary"] or "Agent stopped before finishing.", state["finished"],
-                       state["calls"], transcript)
+                       state["calls"], transcript, plan.mode)
 
 
 async def copilot_ping(github_token: str, model: str = "auto", timeout: float = 120) -> None:
